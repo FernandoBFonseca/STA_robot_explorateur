@@ -13,7 +13,10 @@ if __name__ == '__main__':
     
         try:
           isAvalible = ser.in_waiting > 0
-        except:
+        except KeyboardInterrupt:
+            fp.close()
+            raise KeyboardInterrupt
+        except OSError:
             pass
         
         if isAvalible:
@@ -22,6 +25,7 @@ if __name__ == '__main__':
               
                 
                 fp.write(line)
+                fp.write('\n')
                 print(line)
                  
               if 'boy' in line:
