@@ -64,38 +64,33 @@ PID::PID(double* Input, double* Output, double* Setpoint,
 bool PID::Compute()
 {
    if(!inAuto) return false;
-   unsigned long now = millis();
-   unsigned long timeChange = (now - lastTime);
-   if(timeChange>=SampleTime)
-   {
-      /*Compute all the working error variables*/
-      double input = *myInput;
-      double error = *mySetpoint - input;
+ 
+   /*Compute all the working error variables*/
+   double input = *myInput;
+   double error = *mySetpoint - input;
       
-      outputSum+= ki * ( error - kc*(output - outputSat) );
+   outputSum+= ki * ( error - kc*(output - outputSat) );
 
 
-      //if(outputSum > outMax) outputSum= outMax;
-      //else if(outputSum < outMin) outputSum= outMin;
+   //if(outputSum > outMax) outputSum= outMax;
+   //else if(outputSum < outMin) outputSum= outMin;
 
-      /*Add Proportional on Error, if P_ON_E is specified*/
-      output = kp * error;
+   /*Add Proportional on Error, if P_ON_E is specified*/
+   output = kp * error;
 
-      /*Compute Rest of PID Output*/
+   /*Compute Rest of PID Output*/
 
-      double dError = n*(error - dErrorIntegral);
-      dErrorIntegral += SampleTimeInSec * dError;  
+   double dError = n*(error - dErrorIntegral);
+   dErrorIntegral += SampleTimeInSec * dError;  
 
-      output += outputSum + kd * dError;
-      outputSat = constrain(output, outMin,outMax);
+   output += outputSum + kd * dError;
+   outputSat = constrain(output, outMin,outMax);
 
-	  *myOutput = outputSat;
+	*myOutput = outputSat;
 
-      /*Remember some variables for next time*/
-      lastTime = now;
-	   return true;
-   }
-   else return false;
+   /*Remember some variables for next time*/
+	return true;
+   
 }
 
 /* SetTunings(...)*************************************************************

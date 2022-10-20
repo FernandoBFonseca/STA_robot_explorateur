@@ -74,10 +74,10 @@ class PID
   double dispN;	
 
 	double kp;                  // * (P)roportional Tuning Parameter
-    double ki;                  // * (I)ntegral Tuning Parameter
-    double kd;                  // * (D)erivative Tuning Parameter
-    double kc;                  // * Anti-windup constant
-    double n;                   // * Derivative filter constant
+  double ki;                  // * (I)ntegral Tuning Parameter
+  double kd;                  // * (D)erivative Tuning Parameter
+  double kc;                  // * Anti-windup constant
+  double n;                   // * Derivative filter constant
 
 	int controllerDirection;
 	int pOn;
@@ -91,7 +91,8 @@ class PID
 	double outputSum, lastInput, outputSat,output;
     double dErrorIntegral;
 
-	unsigned long SampleTime,SampleTimeInSec;
+	unsigned long SampleTime;
+  double SampleTimeInSec;
 	double outMin, outMax;
 	bool inAuto, pOnE;
 };
