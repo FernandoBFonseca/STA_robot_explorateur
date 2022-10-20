@@ -1,9 +1,11 @@
-#ifndef SpeedEstimator_h
-#define SpeedEstimator_h
+#ifndef speedEstimator_h
+#define speedEstimator_h
 #define LIBRARY_VERSION	1.0.0
 
 class speedEstimator{
 
+    public:
+    
     speedEstimator(double* Position, double* Voltage, double* Velocity, double K, double tau, 
                    double const *L, unsigned long sample_time_ms);
 

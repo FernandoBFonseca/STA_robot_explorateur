@@ -84,6 +84,7 @@ bool PID::Compute()
    dErrorIntegral += SampleTimeInSec * dError;  
 
    output += outputSum + kd * dError;
+
    outputSat = constrain(output, outMin,outMax);
 
 	*myOutput = outputSat;

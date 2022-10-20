@@ -1,9 +1,11 @@
 #include <Arduino.h>
 #include <PID.hpp>
+#include <speedEstimator.hpp>
 
 void ISR_VA_LINEAR();
 void ISR_VA_STEERING();
 void turn(int motor, float voltage );
+double getPos(int motor);
 
 #define MAX_VOLTAGE 12.0
 #define SAT_VOLTAGE 9.0
@@ -27,21 +29,34 @@ void turn(int motor, float voltage );
 volatile long encoderLinearPos = 0;
 volatile long encoderSteeringPos = 0;
 
-#define KP 0.9824
-#define KI 75.1801
-#define KD 0.1
-#define KC 1000.0
+#define KP_LINEAR 11.4217
+#define KI_LINEAR 515.9935
+#define KD_LINEAR 0.0
+#define KC_LINEAR 1000.0
+#define ENCODER_2_M 5.2e-4
+
+#define KP_STEERING 11.4217
+#define KI_STEERING 515.9935
+#define KD_STEERING 0.0
+#define KC_STEERING 1000.0
+#define ENCODER_2_RAD 5.2e-4
+#define K_STEERING 0.1054
+#define TAU_STEERING 0.0204
 
 
 double InputLinear, OutputLinear, SetpointLinear;
 PID pidLinear(&InputLinear, &OutputLinear, &SetpointLinear,
-    KP, KI, KD, KC, P_ON_E, DIRECT);
+    KP_LINEAR, KI_LINEAR, KD_LINEAR, KC_LINEAR, P_ON_E, DIRECT);
 
-double InputSteering, OutputSteering, SetpointSteering;
-PID pidSteering(&InputSteering, &OutputSteering, &SetpointSteering,
-    KP, KI, KD, KC, P_ON_E, DIRECT);
+double PositionSteering, OutputSteering, SetpointSteering, VelocityEstSteering;
+double const L_Steering[3] = {1,2,3};
+speedEstimator speedSteering(&PositionSteering, &OutputSteering, &VelocityEstSteering, 
+              K_STEERING, TAU_STEERING,L_Steering, SAMPLE_TIME);
+PID pidSteering(&VelocityEstSteering, &OutputSteering, &SetpointSteering,
+    KP_STEERING, KI_STEERING, KD_STEERING, KC_STEERING, P_ON_E, DIRECT);
 
-unsigned long lastTime = 0;
+
+unsigned long lastTime;
 
 void setup() {
   
@@ -62,32 +77,48 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(encoderASteeringPIN), 
     ISR_VA_STEERING, CHANGE);
 
+  
   pidLinear.SetMode(AUTOMATIC);
   pidSteering.SetMode(AUTOMATIC);
 
-  Serial2.begin(115200);
+  pidLinear.SetOutputLimits(-SAT_VOLTAGE,SAT_VOLTAGE);
+  pidSteering.SetOutputLimits(-SAT_VOLTAGE,SAT_VOLTAGE);
 
-  Serial2.println("Go boy");
+  //pidSteering.SetControllerDirection(REVERSE);
+
+  pidLinear.SetSampleTime(SAMPLE_TIME);
+  pidSteering.SetSampleTime(SAMPLE_TIME);
+
+  Serial.begin(115200);
+
+  Serial.println("Go boy");
+
+  
+  lastTime = millis();
 
 }
 
 void loop() {
-  float voltage;
+  //float voltage;
   unsigned long now = millis();
   if(now-lastTime>=SAMPLE_TIME){
 
-    if(5000 <=now && now <= 10000) voltage = 5.0;
-    else voltage = 0.0;
-    turn(LINEAR,voltage);
+    PositionSteering = getPos(STEERING);
 
-    if(now <= 10000){
-      Serial2.print(now);
-      Serial2.print(", ");
-      Serial2.print(voltage);
-      Serial2.print(", ");
-      Serial2.println(encoderLinearPos);
+    if(2500 <=now && now <= 5000) SetpointSteering = 0.5;
+    else SetpointSteering = 0;
+
+    speedSteering.Compute();
+    pidSteering.Compute();
+    turn(STEERING,OutputSteering);
+
+    if(now <= 100000){
+      Serial.print(now);
+      Serial.print(", ");
+      Serial.print(OutputSteering);
+      Serial.print(", ");
+      Serial.println(getPos(STEERING));
     }
-
     lastTime = now;
   }
 
@@ -98,15 +129,15 @@ void loop() {
 void turn(int motor, float voltage ){
   int IN1,IN2,EN;
   if(motor == LINEAR){
-    IN1 = IN2_LINEAR; IN2 = IN1_LINEAR; EN = EN_LINEAR; 
+    IN1 = IN1_LINEAR; IN2 = IN2_LINEAR; EN = EN_LINEAR; 
   }
   else if(motor == STEERING){
     IN1 = IN1_STEERING; IN2 = IN2_STEERING; EN = EN_STEERING;
   }
 
   if(voltage>0){
-        digitalWrite(IN1,LOW);
-        digitalWrite(IN2,HIGH);
+        digitalWrite(IN1,HIGH);
+        digitalWrite(IN2,LOW);
     }
     else{
         digitalWrite(IN1,LOW);
@@ -119,10 +150,10 @@ void turn(int motor, float voltage ){
 
 double getPos(int motor){
   if(motor == LINEAR){
-    return encoderLinearPos;
+    return ENCODER_2_M*encoderLinearPos;
   }
   else if(motor == STEERING){
-    return encoderSteeringPos;
+    return ENCODER_2_RAD*encoderSteeringPos;
   }
   return 0.0;
 
