@@ -1,5 +1,8 @@
 #include <Arduino.h>
 #include <PID.hpp>
+#include <ros.h>
+#include <std_msgs/String.h>
+#include <std_msgs/Float64.h>
 #include <speedEstimator.hpp>
 
 void ISR_VA_LINEAR();
@@ -29,14 +32,14 @@ double getPos(int motor);
 volatile long encoderLinearPos = 0;
 volatile long encoderSteeringPos = 0;
 
-#define KP_LINEAR 11.4217
-#define KI_LINEAR 515.9935
+#define KP_LINEAR 0.001311
+#define KI_LINEAR 0.1056
 #define KD_LINEAR 0.0
 #define KC_LINEAR 1000.0
 #define ENCODER_2_M 5.2e-4
 
-#define KP_STEERING 11.4217
-#define KI_STEERING 515.9935
+#define KP_STEERING 0.01311
+#define KI_STEERING 0.00556
 #define KD_STEERING 0.0
 #define KC_STEERING 1000.0
 #define ENCODER_2_RAD 5.2e-4
@@ -49,12 +52,19 @@ PID pidLinear(&InputLinear, &OutputLinear, &SetpointLinear,
     KP_LINEAR, KI_LINEAR, KD_LINEAR, KC_LINEAR, P_ON_E, DIRECT);
 
 double PositionSteering, OutputSteering, SetpointSteering, VelocityEstSteering;
-double const L_Steering[3] = {1,2,3};
+double const L_Steering[3] = {4.315e4,3.9e2,5.4573e5};
 speedEstimator speedSteering(&PositionSteering, &OutputSteering, &VelocityEstSteering, 
               K_STEERING, TAU_STEERING,L_Steering, SAMPLE_TIME);
-PID pidSteering(&VelocityEstSteering, &OutputSteering, &SetpointSteering,
+PID pidSteering(&PositionSteering, &OutputSteering, &SetpointSteering,
     KP_STEERING, KI_STEERING, KD_STEERING, KC_STEERING, P_ON_E, DIRECT);
 
+ros::NodeHandle nh;
+void messageCb( const std_msgs::Float64& speed_msg) {
+  
+  SetpointSteering = speed_msg.data;
+}
+
+ros::Subscriber<std_msgs::Float64> sub("ref_speed", messageCb );
 
 unsigned long lastTime;
 
@@ -89,9 +99,13 @@ void setup() {
   pidLinear.SetSampleTime(SAMPLE_TIME);
   pidSteering.SetSampleTime(SAMPLE_TIME);
 
-  Serial.begin(115200);
+  //Serial.begin(115200);
 
-  Serial.println("Go boy");
+  nh.initNode();
+
+  nh.subscribe(sub);
+
+  //Serial.println("Go boy");
 
   
   lastTime = millis();
@@ -105,28 +119,35 @@ void loop() {
 
     PositionSteering = getPos(STEERING);
 
-    if(2500 <=now && now <= 5000) SetpointSteering = 0.5;
-    else SetpointSteering = 0;
+    //if(2500<now && now<7500) OutputSteering = (PI/12)/ENCODER_2_RAD;
+    //else OutputSteering = 0;
 
     speedSteering.Compute();
     pidSteering.Compute();
     turn(STEERING,OutputSteering);
 
-    if(now <= 100000){
+    /*if(now <= 30000){
       Serial.print(now);
       Serial.print(", ");
       Serial.print(OutputSteering);
       Serial.print(", ");
-      Serial.println(getPos(STEERING));
-    }
+      Serial.print(getPos(STEERING));
+      Serial.print(", ");
+      Serial.println(SetpointSteering);
+    }*/
     lastTime = now;
+
+    
   }
 
-  
+  nh.spinOnce();
 
 }
 
 void turn(int motor, float voltage ){
+
+  if(abs(voltage) <= 1.6) voltage = 0;
+
   int IN1,IN2,EN;
   if(motor == LINEAR){
     IN1 = IN1_LINEAR; IN2 = IN2_LINEAR; EN = EN_LINEAR; 
@@ -153,7 +174,8 @@ double getPos(int motor){
     return ENCODER_2_M*encoderLinearPos;
   }
   else if(motor == STEERING){
-    return ENCODER_2_RAD*encoderSteeringPos;
+    //return ENCODER_2_RAD*encoderSteeringPos;
+    return encoderSteeringPos;
   }
   return 0.0;
 
