@@ -10,13 +10,13 @@
  *    The parameters specified here are those for for which we can't set up
  *    reliable defaults, so we need to have the user set them.
  ***************************************************************************/
-speedEstimator::speedEstimator(double* Position, double* Voltage, double* VelocityEst, double K, double tau, double const *L, unsigned long sample_time_ms){
+speedEstimator::speedEstimator(double* Position, double* Voltage, double* VelocityEst, double const *sys, double const *L, unsigned long sample_time_ms){
 
     myPosition = Position;
     myVoltage = Voltage;
     myVelocityEst = VelocityEst;
 
-    setParameters(K,tau,L,sample_time_ms);
+    setParameters(sys,L,sample_time_ms);
 
     theta_est = 0.0;
     d_est = 0.0;
@@ -28,18 +28,47 @@ speedEstimator::speedEstimator(double* Position, double* Voltage, double* Veloci
  *   and estimate the speed using a Luenberger observer.
  **********************************************************************************/
 void speedEstimator::Compute(){ // * This is where the magic happens, here we read the position and applied voltage
-                                //   and estimate the speed using a Luenberger observer.
+                                //   and estimate the speed using a discreate Luenberger observer.
+
+    /*
+      y = theta
+  
+      X_est = [v_est,theta_est,d_est]'
+      y_est = theta_est
+      
+      X_est_n+1 = A*X_est_n + B*u + L*(y-y_est)
+      y_est_n = C*X_est_n
+
+      Where 
+
+      A = [a1 0 a2;
+           b1 1 b2;
+            0 0  1;]
+      B = [a2;
+           b2;
+            0;]
+      C = [0 1 0]
+
+      L = [L1;
+           L2;
+           L3;]
+    
+    */
 
     double theta = *myPosition;
     double u = *myVoltage;
     double v_est = *myVelocityEst;
 
-    float dot_v_est     = a*v_est + b*u + b*d_est + L1*(theta-theta_est);
-    float dot_theta_est = 1.0*v_est               + L2*(theta-theta_est);
-    float dot_d_est     =                           L3*(theta-theta_est);  
-    v_est     += dot_v_est*SampleTimeInSec;
-    theta_est += dot_theta_est*SampleTimeInSec;
-    d_est += dot_d_est*SampleTimeInSec;
+    double new_v_est,new_theta_est,new_d_est;
+
+    new_v_est     = a1*v_est +             a2*d_est + a2*u + L1*(theta-theta_est);
+    new_theta_est = b1*v_est + theta_est + b2*d_est + b2*u + L2*(theta-theta_est);
+    //new_d_est     =                           d_est +        L3*(theta-theta_est);  
+
+
+    v_est     = new_v_est;
+    theta_est = new_theta_est;
+    //d_est     = new_d_est; 
 
     *myVelocityEst = v_est;
 }
@@ -49,16 +78,18 @@ void speedEstimator::Compute(){ // * This is where the magic happens, here we re
  * it's called automatically from the constructor, but tunings can also
  * be adjusted on the fly during normal operation
  ******************************************************************************/
-void speedEstimator::setParameters(double K, double tau, double const *L, unsigned long sample_time_ms){
+void speedEstimator::setParameters(double const *sys, double const *L, unsigned long sample_time_ms){
 
-    if (K<0 || tau<0 || sample_time_ms<0) return;
+    //if (K<0 || tau<0 || sample_time_ms<0) return;
+    if (sys == NULL || L == NULL || sample_time_ms<0) return;
 
-    dispK = K;
-    dispTau = tau;
+    //dispK = K;
+    //dispTau = tau;
 
-    a = (-1.0/tau);
-    b = K/tau;
+    //a = (-1.0/tau);
+    //b = K/tau;
     
+    a1 = sys[0], a2 = sys[1], b1 = sys[2], b2 = sys[3];
     L1 = L[0]; L2 = L[1]; L3 = L[2];
 
     SampleTime = sample_time_ms;
@@ -71,7 +102,7 @@ void speedEstimator::setParameters(double K, double tau, double const *L, unsign
  * functions query the internal state of the Estimator. they're here for display
  * purposes.  this are the functions the Front-end uses for example
  ******************************************************************************/
-double speedEstimator::getK(){return dispK;}
-double speedEstimator::getTau(){return dispTau;}
+//double speedEstimator::getK(){return dispK;}
+//ouble speedEstimator::getTau(){return dispTau;}
 double speedEstimator::getThetaEst(){return theta_est;}
 double speedEstimator::getDEst(){return d_est;}
