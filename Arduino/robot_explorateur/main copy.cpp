@@ -40,7 +40,6 @@ void publishSpeed(double time);
 
 volatile long encoderLinearPos = 0;
 volatile long encoderSteeringPos = 0;
-volatile int sense_linear = 1, sense_steering = 1;
 volatile long t_ISR_linear = 0, t_ISR_last_linear = 0;
 volatile long t_ISR_steering = 0, t_ISR_last_steering = 0;
 
@@ -50,44 +49,40 @@ volatile long t_ISR_steering = 0, t_ISR_last_steering = 0;
 //#define KP_LINEAR 0.038753 //Position Control (ref = [encoder])
 //#define KI_LINEAR 0.074189
 #define KD_LINEAR 0.0
-#define KC_LINEAR 0.0
+#define KC_LINEAR 100.0
 #define ENCODER_2_M 3.82e-05
-#define MAX_SPEED_LINEAR 3*0.0882
+#define MAX_SPEED_LINEAR 0.0882
 #define TF 100//Low pass filter response time (ms)
 
-//#define KP_STEERING 0.01311 //Position Control (ref = [encoder])
-//#define KI_STEERING 0.00556
-#define KP_STEERING 25.2115 //Position Control (ref = [rad])
-#define KI_STEERING 10.6923
-//#define KP_STEERING 205.6 //Position Control (ref = [rad])
-//#define KI_STEERING 72.09
+
+#define KP_STEERING 0.01311 //Position Control (ref = [encoder])
+#define KI_STEERING 0.00556
+//#define KP_STEERING 0.01311/ENCODER_2_RAD //Position Control (ref = [rad])
+//#define KI_STEERING 0.00556/ENCODER_2_RAD
 #define KD_STEERING 0.0
-#define KC_STEERING 5.0
+#define KC_STEERING 100.0
 #define ENCODER_2_RAD 5.2e-4
-#define MAX_SPEED_STEERING 0.9486
 #define WHEELBASE_SIZE 0.192
-#define WHEELRADIUS 0.03
-//#define MAX_STEERING_ANGLE_RAD 0.5235988 //30°
-#define MAX_STEERING_ANGLE_RAD 0.2618 //15°
+#define MAX_STEERING_ANGLE_RAD 0.5235988 //30°
 
 
 //********** --- CONTROL --- **********/
 
 double PositionLinear, VelocityEstLinear, OutputLinear, SetpointLinear;
-//double const sys_Linear[4] = {0.6036,0.003876,0.007883,2.109e-5};
+double const sys_Linear[4] = {0.6036,0.003876,0.007883,2.109e-5};
 //double const L_Linear[3] = {180.028407512287,2.59708116023640,25533.5643547191};
-//double const L_Linear[3] = {45.72,1.59,0};
+double const L_Linear[3] = {45.72,1.59,0};
 
-//speedEstimator speedLinear(&PositionLinear, &OutputLinear, &VelocityEstLinear, 
-//              sys_Linear,L_Linear, SAMPLE_TIME);
+speedEstimator speedLinear(&PositionLinear, &OutputLinear, &VelocityEstLinear, 
+              sys_Linear,L_Linear, SAMPLE_TIME);
 PID pidLinear(&VelocityEstLinear, &OutputLinear, &SetpointLinear,
     KP_LINEAR, KI_LINEAR, KD_LINEAR, KC_LINEAR, P_ON_E, DIRECT);
 
 
-double PositionSteering, VelocityEstSteering, OutputSteering, SetpointSteering;
-//double const sys_Steering[4] = {0.6117,0.04093,0.007931,0.0002222};
+double PositionSteering, OutputSteering, SetpointSteering;
+double const sys_Steering[4] = {0.6117,0.04093,0.007931,0.0002222};
 //double const L_Steering[3] = {181.207509792776,2.60430970272214,2415.44175916169};
-//double const L_Steering[3] = {46.6087,1.6043,0};
+double const L_Steering[3] = {46.6087,1.6043,0};
 
 //speedEstimator speedSteering(&PositionSteering, &OutputSteering, &VelocityEstSteering, 
 //              sys_Steering,L_Steering, SAMPLE_TIME);
@@ -106,24 +101,20 @@ void messageCb( const geometry_msgs::Twist& speed_msg) {
   SetpointLinear = constrain(SetpointLinear, -MAX_SPEED_LINEAR, MAX_SPEED_LINEAR);
 
   SetpointSteering = convert_trans_rot_vel_to_steering_angle(SetpointLinear, speed_msg.angular.z);
-  SetpointSteering = constrain(SetpointSteering, -MAX_STEERING_ANGLE_RAD, MAX_STEERING_ANGLE_RAD);
+  SetpointSteering = constrain(SetpointSteering, -MAX_STEERING_ANGLE_RAD, MAX_STEERING_ANGLE_RAD) /ENCODER_2_RAD;
 
   nh.loginfo("Receiving Message:");
   buf = String(String("linear: ") + String(SetpointLinear) + "m/s, angular: " + String(SetpointSteering) +  "rad");
   nh.loginfo(buf.c_str());
-  buf = String(String(OutputLinear) + " - " + String(VelocityEstLinear) + ", " + String(OutputSteering) + " - " + String(PositionSteering));
-  nh.loginfo(buf.c_str());
+  //buf = String(String(PositionLinear) + "  " + String(PositionSteering));
+  //nh.loginfo(buf.c_str());
 }
 ros::Subscriber<geometry_msgs::Twist> cmd_vel("cmd_vel", messageCb );
 
 geometry_msgs::Vector3Stamped speed_msg;  //create a "speed_msg" ROS message
 ros::Publisher speed_pub("est_vel", &speed_msg); 
 
-
-
 unsigned long lastTime;
-
-
 
 void setup() {
   
@@ -166,27 +157,19 @@ void setup() {
 
 }
 
+//const double alpha = TF/(TF+SAMPLE_TIME);
+const double alpha = 0;
 
-const double alpha = (double) TF/(TF+SAMPLE_TIME);
-unsigned int counter = 0;
 void loop() {
 
   unsigned long now = millis();
   if(now-lastTime>=SAMPLE_TIME){
 
 
-
     PositionSteering = getPos(STEERING);
-    PositionLinear = getPos(LINEAR);
-
     //This is a fix while the speed estimation lib does not work
     VelocityEstLinear = alpha*VelocityEstLinear + (1-alpha)*getSpeed(LINEAR);
-    //VelocityEstSteering = getSpeed(STEERING);
-    //if(VelocityEstLinear == getSpeed(LINEAR)) counter++;
-    //if(counter == 5) {
-    // ISR_VA_LINEAR();
-    //  counter = 0;
-    //}
+
 
     //speedLinear.Compute();
     pidLinear.Compute();
@@ -249,8 +232,8 @@ double getPos(int motor){
     //return encoderLinearPos;
   }
   else if(motor == STEERING){
-    pos_copy = ENCODER_2_RAD*encoderSteeringPos;  
-    //return encoderSteeringPos;
+    //pos_copy = ENCODER_2_RAD*encoderSteeringPos;  
+    return encoderSteeringPos;
 
   }
   interrupts();
@@ -263,28 +246,25 @@ double getPos(int motor){
 double getSpeed(int motor){
     double  t_ISR_last_copy;
     double  t_ISR_copy;
-    int sense_copy;
     double  coef;
-
     noInterrupts();
     if(motor == LINEAR){
-      t_ISR_last_copy =t_ISR_last_linear;
-      t_ISR_copy = t_ISR_linear;
-      sense_copy = sense_linear;
+      t_ISR_last_copy = t_ISR_last_linear;
+      t_ISR_copy      = t_ISR_linear;
       coef = ENCODER_2_M;   
-
+      //return encoderLinearPos;
     }
     else if(motor == STEERING){
       t_ISR_last_copy =t_ISR_last_steering;
       t_ISR_copy = t_ISR_steering;
-      sense_copy = sense_steering;
       coef = ENCODER_2_RAD;
+      //return encoderSteeringPos;
     }
     interrupts();
     if( t_ISR_copy==t_ISR_last_copy)
         return 0;
     else
-        return sense_copy*(coef/(t_ISR_copy-t_ISR_last_copy) )*1e6;
+        return (coef/(t_ISR_copy-t_ISR_last_copy) )*1e6;
 
 }
 
@@ -293,12 +273,7 @@ double convert_trans_rot_vel_to_steering_angle(double v, double w){
   
   double radius = v / w;
 
-  int direction;
-  if(SGN(v) ==SGN(w)) direction = 1;
-  else if(SGN(v) != SGN(w)) direction = -1;
-  else direction = 0;
-
-  return direction*atan2(WHEELBASE_SIZE, radius);
+  return atan2(WHEELBASE_SIZE, radius);
 }
 
 double steering_angle_trans_vel_2_rot_vel(double v, double phi){
@@ -310,9 +285,7 @@ double steering_angle_trans_vel_2_rot_vel(double v, double phi){
 void publishSpeed(double time) {
   speed_msg.header.stamp = nh.now();      //timestamp for odometry data
   speed_msg.vector.x = VelocityEstLinear;    //rear wheel speed (in m/s)
-  speed_msg.vector.y = PositionSteering;   //steering axes speed (in rad/s)
-  //speed_msg.vector.x = PositionLinear/(2*PI*WHEELRADIUS);    //rear wheel speed (in m/s)
-  //speed_msg.vector.y = PositionSteering;   //steering axes speed (in rad/s)
+  speed_msg.vector.y = steering_angle_trans_vel_2_rot_vel(VelocityEstLinear, PositionSteering*ENCODER_2_RAD); //rotation speed (in rad/s)
   speed_msg.vector.z = time * 1e-3;         //looptime, should be the same as specified in LOOPTIME (in s)
   speed_pub.publish(&speed_msg);
   nh.spinOnce();
@@ -323,18 +296,16 @@ void ISR_VA_LINEAR(){
 
   if (digitalRead(encoderALinearPIN) == HIGH){
 
-    if (digitalRead(encoderBLinearPIN) == HIGH)sense_linear =1;
-    else sense_linear =-1;
+    if (digitalRead(encoderBLinearPIN) == HIGH)encoderLinearPos += 1;
+    else encoderLinearPos -= 1;
 
   }
   else{
 
-    if (digitalRead(encoderBLinearPIN) == LOW)sense_linear = 1;
-    else sense_linear =-1;
+    if (digitalRead(encoderBLinearPIN) == LOW)encoderLinearPos += 1;
+    else encoderLinearPos -= 1;
 
   }
-
-  encoderLinearPos += sense_linear;
 
   t_ISR_last_linear = t_ISR_linear;
   t_ISR_linear = micros();
@@ -345,21 +316,20 @@ void ISR_VA_STEERING(){
 
   if (digitalRead(encoderASteeringPIN) == HIGH){
 
-    if (digitalRead(encoderBSteeringPIN) == HIGH)sense_steering = 1;
-    else sense_steering =- 1;
+    if (digitalRead(encoderBSteeringPIN) == HIGH)encoderSteeringPos += 1;
+    else encoderSteeringPos -= 1;
 
   }
   else{
 
-    if (digitalRead(encoderBSteeringPIN) == LOW)sense_steering = 1;
-    else sense_steering =- 1;
+    if (digitalRead(encoderBSteeringPIN) == LOW)encoderSteeringPos += 1;
+    else encoderSteeringPos -= 1;
 
   }
-
-  encoderSteeringPos += sense_steering;
 
   t_ISR_last_steering = t_ISR_steering;
   t_ISR_steering = micros();
 
 
 }
+
