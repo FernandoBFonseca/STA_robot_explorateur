@@ -13,7 +13,6 @@ void ISR_VA_STEERING();
 void turn(int motor, double *voltage );
 double getPos(int motor);
 double getSpeed(int motor);
-double convert_trans_rot_vel_to_steering_angle(double v, double w);
 void publishSpeed(double time);
 
 #define SGN(x) ((x) < 0 ? -1 : ((x) > 0 ? 1 : 0))
@@ -45,12 +44,14 @@ volatile long t_ISR_linear = 0, t_ISR_last_linear = 0;
 volatile long t_ISR_steering = 0, t_ISR_last_steering = 0;
 
 
-#define KP_LINEAR 26.11 //SpeedControl (ref = [m/s])
-#define KI_LINEAR 2184.2232
+//#define KP_LINEAR 26.11 //SpeedControl (ref = [m/s])
+//#define KI_LINEAR 2184.2232
+#define KP_LINEAR 12.41 //SpeedControl (ref = [m/s])
+#define KI_LINEAR 408.4
 //#define KP_LINEAR 0.038753 //Position Control (ref = [encoder])
 //#define KI_LINEAR 0.074189
 #define KD_LINEAR 0.0
-#define KC_LINEAR 0.0
+#define KC_LINEAR 1.0
 #define ENCODER_2_M 3.82e-05
 #define MAX_SPEED_LINEAR 3*0.0882
 #define TF 100//Low pass filter response time (ms)
@@ -68,7 +69,9 @@ volatile long t_ISR_steering = 0, t_ISR_last_steering = 0;
 #define WHEELBASE_SIZE 0.192
 #define WHEELRADIUS 0.03
 //#define MAX_STEERING_ANGLE_RAD 0.5235988 //30°
-#define MAX_STEERING_ANGLE_RAD 0.2618 //15°
+#define MAX_STEERING_ANGLE_RAD 0.4363323 //25°
+//#define MAX_STEERING_ANGLE_RAD 0.2618 //15°
+
 
 
 //********** --- CONTROL --- **********/
@@ -100,12 +103,13 @@ ros::NodeHandle nh;
 
 String buf;
 
+//Message reader Callback function for speed and position serpoint for the linear and steering motors
 void messageCb( const geometry_msgs::Twist& speed_msg) {
   
   SetpointLinear = speed_msg.linear.x;
   SetpointLinear = constrain(SetpointLinear, -MAX_SPEED_LINEAR, MAX_SPEED_LINEAR);
 
-  SetpointSteering = convert_trans_rot_vel_to_steering_angle(SetpointLinear, speed_msg.angular.z);
+  SetpointSteering = speed_msg.angular.z;
   SetpointSteering = constrain(SetpointSteering, -MAX_STEERING_ANGLE_RAD, MAX_STEERING_ANGLE_RAD);
 
   nh.loginfo("Receiving Message:");
@@ -114,11 +118,10 @@ void messageCb( const geometry_msgs::Twist& speed_msg) {
   buf = String(String(OutputLinear) + " - " + String(VelocityEstLinear) + ", " + String(OutputSteering) + " - " + String(PositionSteering));
   nh.loginfo(buf.c_str());
 }
-ros::Subscriber<geometry_msgs::Twist> cmd_vel("cmd_vel", messageCb );
+ros::Subscriber<geometry_msgs::Twist> cmd_vel("cmd_vel", messageCb ); //create a "cmd_vel" ROS subscriber
 
 geometry_msgs::Vector3Stamped speed_msg;  //create a "speed_msg" ROS message
 ros::Publisher speed_pub("est_vel", &speed_msg); 
-
 
 
 unsigned long lastTime;
@@ -127,6 +130,7 @@ unsigned long lastTime;
 
 void setup() {
   
+  //Encoders setup and motor setup
   pinMode(encoderALinearPIN, INPUT_PULLUP);
   pinMode(encoderBLinearPIN, INPUT_PULLUP);
   pinMode(IN1_LINEAR, OUTPUT);
@@ -144,7 +148,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(encoderASteeringPIN), 
     ISR_VA_STEERING, CHANGE);
 
-  
+  //Control setup
   pidLinear.SetMode(AUTOMATIC);
   pidSteering.SetMode(AUTOMATIC);
 
@@ -154,6 +158,7 @@ void setup() {
   pidLinear.SetSampleTime(SAMPLE_TIME);
   pidSteering.SetSampleTime(SAMPLE_TIME);
 
+  //ROS setup
   nh.getHardware()->setBaud(57600);
   nh.getHardware()->setPort(&Serial);
 
@@ -166,28 +171,21 @@ void setup() {
 
 }
 
-
-const double alpha = (double) TF/(TF+SAMPLE_TIME);
+//This is a fix
+const double alpha = (double) TF/(TF+SAMPLE_TIME);//Settting a low pass filter for the velocity estimation
 unsigned int counter = 0;
 void loop() {
 
   unsigned long now = millis();
   if(now-lastTime>=SAMPLE_TIME){
 
-
-
+    //Getting sensor data
     PositionSteering = getPos(STEERING);
-    PositionLinear = getPos(LINEAR);
-
     //This is a fix while the speed estimation lib does not work
-    VelocityEstLinear = alpha*VelocityEstLinear + (1-alpha)*getSpeed(LINEAR);
-    //VelocityEstSteering = getSpeed(STEERING);
-    //if(VelocityEstLinear == getSpeed(LINEAR)) counter++;
-    //if(counter == 5) {
-    // ISR_VA_LINEAR();
-    //  counter = 0;
-    //}
+    VelocityEstLinear = alpha*VelocityEstLinear + (1-alpha)*getSpeed(LINEAR);//Low pass filter
 
+    
+    //Computing PID and Sending voltage to the motors
     //speedLinear.Compute();
     pidLinear.Compute();
     turn(LINEAR,&OutputLinear);
@@ -196,7 +194,7 @@ void loop() {
     pidSteering.Compute();
     turn(STEERING,&OutputSteering);
     
-    publishSpeed(SAMPLE_TIME);   //Publish odometry on ROS topic
+    publishSpeed(SAMPLE_TIME); //Publish odometry on ROS topic
 
     lastTime = now;
 
@@ -207,17 +205,20 @@ void loop() {
 
 }
 
+//Function to send voltage to the motors
 void turn(int motor, double *voltage ){
 
-  if(abs(*voltage) <= 1.6) *voltage = 0;
 
   int IN1,IN2,EN;
   float pos;
 
+  //Getting ports 
   if(motor == LINEAR){
     IN1 = IN1_LINEAR; IN2 = IN2_LINEAR; EN = EN_LINEAR; 
   }
   else if(motor == STEERING){
+    //Small tests for limit the voltage we send the motor
+    if(abs(*voltage) <= 1.6) *voltage = 0;//If voltage is to low, don't send nothing
     pos = getPos(STEERING);
     
     if(ABS(pos) >= MAX_STEERING_ANGLE_RAD && SGN(pos) ==  SGN(*voltage)) *voltage = 0; //Steering Angle Saturation: 
@@ -227,19 +228,24 @@ void turn(int motor, double *voltage ){
     IN1 = IN1_STEERING; IN2 = IN2_STEERING; EN = EN_STEERING;
   }
 
+  //Setting sense (clockwise or anti-clockwise)
   if(*voltage>0){
-        digitalWrite(IN1,HIGH);
-        digitalWrite(IN2,LOW);
-    }
-    else{
-        digitalWrite(IN1,LOW);
-        digitalWrite(IN2,HIGH);
-    }
+    digitalWrite(IN1,HIGH);
+    digitalWrite(IN2,LOW);
+  }
+  else{
+    digitalWrite(IN1,LOW);
+    digitalWrite(IN2,HIGH);
+  }
+
+    //Saturation limiting
     *voltage = constrain(*voltage, -SAT_VOLTAGE, SAT_VOLTAGE);
 
+    //Senting voltage to the motors
     analogWrite(EN, abs(*voltage)*255.0/MAX_VOLTAGE);
 }
 
+//Calculation of Enconder absolute position in S.I units
 double getPos(int motor){
 
   double pos_copy = 0;
@@ -267,6 +273,7 @@ double getSpeed(int motor){
     double  coef;
 
     noInterrupts();
+    //Copying enconder data
     if(motor == LINEAR){
       t_ISR_last_copy =t_ISR_last_linear;
       t_ISR_copy = t_ISR_linear;
@@ -281,6 +288,9 @@ double getSpeed(int motor){
       coef = ENCODER_2_RAD;
     }
     interrupts();
+    //Calcutation of velocity using v_est = ΔS/ΔT
+    //Where ΔS is always the distance between to enconder steps
+    //And ΔT is the time between to enconder readings
     if( t_ISR_copy==t_ISR_last_copy)
         return 0;
     else
@@ -288,38 +298,18 @@ double getSpeed(int motor){
 
 }
 
-double convert_trans_rot_vel_to_steering_angle(double v, double w){
-  if(w == 0 or v == 0) return 0.0;
-  
-  double radius = v / w;
-
-  int direction;
-  if(SGN(v) ==SGN(w)) direction = 1;
-  else if(SGN(v) != SGN(w)) direction = -1;
-  else direction = 0;
-
-  return direction*atan2(WHEELBASE_SIZE, radius);
-}
-
-double steering_angle_trans_vel_2_rot_vel(double v, double phi){
-  
-  return v*tan(phi)/WHEELBASE_SIZE;
-}
-
 //Publish function for odometry, uses a vector type message to send the data (message type is not meant for that but that's easier than creating a specific message type)
 void publishSpeed(double time) {
   speed_msg.header.stamp = nh.now();      //timestamp for odometry data
   speed_msg.vector.x = VelocityEstLinear;    //rear wheel speed (in m/s)
-  speed_msg.vector.y = PositionSteering;   //steering axes speed (in rad/s)
-  //speed_msg.vector.x = PositionLinear/(2*PI*WHEELRADIUS);    //rear wheel speed (in m/s)
-  //speed_msg.vector.y = PositionSteering;   //steering axes speed (in rad/s)
+  speed_msg.vector.y = PositionSteering;   //steering axe position (in rad)
   speed_msg.vector.z = time * 1e-3;         //looptime, should be the same as specified in LOOPTIME (in s)
   speed_pub.publish(&speed_msg);
   nh.spinOnce();
   //nh.loginfo("Publishing odometry");
 }
 
-void ISR_VA_LINEAR(){
+void ISR_VA_LINEAR(){//ISR to read linear motor enconder
 
   if (digitalRead(encoderALinearPIN) == HIGH){
 
@@ -341,7 +331,7 @@ void ISR_VA_LINEAR(){
 
 }
 
-void ISR_VA_STEERING(){
+void ISR_VA_STEERING(){//IST to read steering motor encoder
 
   if (digitalRead(encoderASteeringPIN) == HIGH){
 
@@ -360,6 +350,4 @@ void ISR_VA_STEERING(){
 
   t_ISR_last_steering = t_ISR_steering;
   t_ISR_steering = micros();
-
-
 }

@@ -1,3 +1,6 @@
+//This lib unfortunately does not work :(
+//I accept help  
+
 #ifndef speedEstimator_h
 #define speedEstimator_h
 #define LIBRARY_VERSION	1.0.0
@@ -38,11 +41,6 @@ class speedEstimator{
 
     unsigned long SampleTime;
     double SampleTimeInSec;
-    
-
-    
-
-
 
 };
 
